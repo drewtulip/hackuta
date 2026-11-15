@@ -19,6 +19,16 @@ const BORDERS = [
 const BORDER_RANK = { faze: 4, legendary: 3, epic: 2, rare: 1, common: 0 };
 const BORDER_LABEL = { faze: 'Legendary · FaZe Red', legendary: 'Legendary · Gold', epic: 'Epic', rare: 'Rare', common: 'Common' };
 const BORDER_SHORT = { faze: 'FaZe Red', legendary: 'Legendary', epic: 'Epic', rare: 'Rare', common: 'Common' };
+const RARITY_RANK = { Common: 0, Rare: 1, Epic: 2, Legendary: 3 };
+const BACKGROUND_AUDIO_PATH = '/audio/pack-opening-background.opus';
+const GOD_AUDIO_PATHS = {
+  Zeus: '/audio/zeus.opus',
+  Poseidon: '/audio/poseidon.opus',
+  Hades: '/audio/hades.opus',
+  Ares: '/audio/ares.opus',
+};
+// Pack-opening sequence duration in milliseconds
+const OPEN_DURATION_MS = 10000;
 const FILTERS = ['All', 'Common', 'Rare', 'Epic', 'Legendary', 'FaZe Red'];
 
 const DEMO_PACKS = [
@@ -104,6 +114,33 @@ export default function Home() {
   const [lbShown, setLbShown] = useState(7);
   const packsRef = useRef(null);
 
+  // Audio players kept across re-renders without triggering state updates
+  const openAudioRef = useRef(null);
+  const godAudioRefs = useRef({});
+  const activeGodAudioRef = useRef(null);
+
+  useEffect(() => {
+    const audio = new Audio(BACKGROUND_AUDIO_PATH);
+    audio.preload = 'metadata';
+    audio.volume = 0.6;
+    audio.loop = true;
+    openAudioRef.current = audio;
+
+    const loadedGodAudios = {};
+    for (const [god, path] of Object.entries(GOD_AUDIO_PATHS)) {
+      const a = new Audio(path);
+      a.preload = 'metadata';
+      a.volume = 0.6;
+      loadedGodAudios[god] = a;
+    }
+    godAudioRefs.current = loadedGodAudios;
+
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+    };
+  }, []);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: l } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
@@ -158,34 +195,100 @@ export default function Home() {
     if (!error) setView('home');
   };
 
+  const stopActiveGodAudio = () => {
+    if (activeGodAudioRef.current) {
+      activeGodAudioRef.current.pause();
+      activeGodAudioRef.current.currentTime = 0;
+      activeGodAudioRef.current = null;
+    }
+  };
+
+  // Play the god-form sound of the highest-rarity Epic or Legendary pull
+  const triggerGodPullAudio = (pulledItems) => {
+    let topPull = null;
+    let topRank = RARITY_RANK.Epic - 1;
+    for (const item of pulledItems) {
+      const rarity = item?.card_variants?.rarity;
+      const godForm = item?.card_variants?.cards?.god_form;
+      const rank = RARITY_RANK[rarity] ?? -1;
+      if (rank > topRank && godForm && godAudioRefs.current[godForm]) {
+        topRank = rank;
+        topPull = godForm;
+      }
+    }
+    if (topPull) {
+      stopActiveGodAudio();
+      const godAudio = godAudioRefs.current[topPull];
+      godAudio.currentTime = 0;
+      activeGodAudioRef.current = godAudio;
+      godAudio.play().catch((err) => console.error(`${topPull} reveal audio playback failed:`, err));
+    }
+  };
+
   const buy = async (packId) => {
     if (opening) return;
     if (!session) return go('auth');
+
+    stopActiveGodAudio();
+
+    // Start the 10-second pack-opening loop
+    if (openAudioRef.current) {
+      const audio = openAudioRef.current;
+      audio.currentTime = 0;
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        audio.playbackRate = Math.min(Math.max(audio.duration / 10, 0.5), 2.0);
+      }
+      audio.play().catch((err) => console.error('Pack opening audio playback failed:', err));
+    }
+
     setOpening(true);
     setMsg('Opening pack...');
+    const tenSecondTimer = new Promise((resolve) => setTimeout(resolve, OPEN_DURATION_MS));
+
     try {
-      const r = await fetch('/api/packs/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
-        body: JSON.stringify({ packId }),
-      }).then((res) => res.json());
-      if (r.error) {
-        setMsg(r.error);
+      // Run the API call, data reload, and 10s timer concurrently
+      const [result] = await Promise.all([
+        (async () => {
+          const r = await fetch('/api/packs/open', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
+            body: JSON.stringify({ packId }),
+          }).then((res) => res.json());
+          if (r.error) return { error: r.error };
+
+          await load(session.user.id);
+          const { data: latest } = await supabase
+            .from('user_cards')
+            .select('id, card_variants(id, border, finish, rarity, cards(id, card_name, god_form, element, attack, defense, players(name, category, image_url)))')
+            .eq('user_id', session.user.id)
+            .order('acquired_at', { ascending: false })
+            .limit(5);
+          return { latest: latest || [] };
+        })(),
+        tenSecondTimer,
+      ]);
+
+      if (openAudioRef.current) {
+        openAudioRef.current.pause();
+        openAudioRef.current.currentTime = 0;
+      }
+
+      if (result.error) {
+        setMsg(result.error);
       } else {
         setMsg('Pack opened! Check your new cards below.');
-        await load(session.user.id);
-        const { data: latest } = await supabase
-          .from('user_cards')
-          .select('id, card_variants(id, border, finish, rarity, cards(id, card_name, god_form, element, attack, defense, players(name, category, image_url)))')
-          .eq('user_id', session.user.id)
-          .order('acquired_at', { ascending: false })
-          .limit(5);
-        setPulled(latest || []);
+        setPulled(result.latest);
+        triggerGodPullAudio(result.latest);
       }
     } catch (e) {
       setMsg('Failed to open pack.');
+    } finally {
+      if (openAudioRef.current) {
+        openAudioRef.current.pause();
+        openAudioRef.current.currentTime = 0;
+      }
+      setOpening(false);
     }
-    setOpening(false);
   };
 
   const ask = async () => {
