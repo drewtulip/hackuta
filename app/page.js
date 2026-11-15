@@ -247,7 +247,9 @@ export default function Home() {
   const [d, setD] = useState({ packs: [], cards: [], variants: [], wallet: null, myCards: [] });
   const [f, setF] = useState({ email: '', pw: '', name: '' });
   const [q, setQ] = useState('');
-  const [ans, setAns] = useState('');
+  const [chats, setChats] = useState([]);
+  const [pending, setPending] = useState('');
+  const chatEndRef = useRef(null);
   const [asking, setAsking] = useState(false);
   const [filter, setFilter] = useState('All');
   const [sort, setSort] = useState('rare');
@@ -316,6 +318,19 @@ export default function Home() {
   useEffect(() => {
     if (session) load(session.user.id);
   }, [session]);
+
+  // Saved Athena chat history for the signed-in user
+  useEffect(() => {
+    if (!session) { setChats([]); return; }
+    fetch('/api/oracle', { headers: { Authorization: 'Bearer ' + session.access_token } })
+      .then((r) => r.json())
+      .then((j) => setChats(j.chats || []))
+      .catch(() => {});
+  }, [session]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [chats, pending]);
 
   const go = (v) => {
     setMsg('');
@@ -432,21 +447,36 @@ export default function Home() {
     }
   };
 
+  const ATHENA_FALLBACK = 'Athena has ascended to Mount Olympus to commune with the Fates—return shortly.';
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
   const ask = async () => {
-    if (!q.trim() || asking) return;
+    const question = q.trim();
+    if (!question || asking) return;
     setAsking(true);
-    setAns('Athena consults the scrolls of Mount Olympus...');
+    setQ('');
+    setPending(question);
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token };
+    let answer = ATHENA_FALLBACK;
     try {
-      const r = await fetch('/api/oracle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
-        body: JSON.stringify({ question: q }),
-      });
+      const r = await fetch('/api/oracle', { method: 'POST', headers, body: JSON.stringify({ question }) });
       const data = await r.json();
-      setAns(data.answer || 'Athena has ascended to Mount Olympus to commune with the Fates—return shortly.');
+      if (data.interactionId) {
+        // The answer is generated in the background: check back until it is ready (about 90s max).
+        for (let i = 0; i < 45; i++) {
+          await sleep(2000);
+          const pr = await fetch(`/api/oracle?id=${encodeURIComponent(data.interactionId)}&q=${encodeURIComponent(question)}`, { headers });
+          const pj = await pr.json();
+          if (pj.status === 'completed' || pj.status === 'failed') { answer = pj.answer || ATHENA_FALLBACK; break; }
+        }
+      } else if (data.answer) {
+        answer = data.answer;
+      }
     } catch (e) {
-      setAns('Athena has ascended to Mount Olympus to commune with the Fates—return shortly.');
+      answer = ATHENA_FALLBACK;
     }
+    setChats((c) => [...c, { id: 'local-' + Date.now(), question, answer }]);
+    setPending('');
     setAsking(false);
   };
 
@@ -791,11 +821,28 @@ export default function Home() {
           <section className="wrap sec">
             <div className="sh"><h2>Ask Athena</h2><p>Goddess of wisdom. Ask which pack or god form to chase.</p></div>
             <div className="ask">
-              <div className="row">
-                <input placeholder="Which pack or god form should I chase?" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ask()} />
-                <button className="btn red" onClick={ask} disabled={asking}>Ask</button>
+              <div className="chat" aria-live="polite">
+                {chats.length === 0 && !pending && (
+                  <p className="mut chat-empty">No questions yet. Ask Athena which pack or god form to chase.</p>
+                )}
+                {chats.map((c) => (
+                  <div key={c.id}>
+                    <div className="bub q"><b>You</b>{c.question}</div>
+                    <div className="bub a"><b>Athena</b>{c.answer}</div>
+                  </div>
+                ))}
+                {pending && (
+                  <div>
+                    <div className="bub q"><b>You</b>{pending}</div>
+                    <div className="bub a wait"><b>Athena</b>Athena consults the scrolls of Mount Olympus...</div>
+                  </div>
+                )}
+                <div ref={chatEndRef} />
               </div>
-              <p style={{ whiteSpace: 'pre-wrap' }}>{ans}</p>
+              <div className="row">
+                <input placeholder="Which pack or god form should I chase?" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ask()} disabled={asking} />
+                <button className="btn red" onClick={ask} disabled={asking}>{asking ? 'Consulting...' : 'Ask'}</button>
+              </div>
             </div>
           </section>
         )}
