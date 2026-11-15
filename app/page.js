@@ -753,7 +753,7 @@ export default function Home() {
               const unavailable = p.live && p.event;
               return (
                 <div className={`pack${p.event ? ' ev' : ''}`} key={p.id}>
-                  <div className="art">{!p.event && '[Pack artwork]'}</div>
+                  <div className="art" />
                   <div className="bd">
                     <div className="k">{p.kicker}</div>
                     <h4>{p.name}</h4>
