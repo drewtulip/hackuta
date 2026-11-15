@@ -76,10 +76,34 @@ export async function POST(req) {
     const question = typeof body?.question === 'string' ? body.question.trim() : '';
     if (!question) return NextResponse.json({ answer: FALLBACK_MSG }, { status: 400 });
 
-    const [{ data: packs }, { data: sampleCards }] = await Promise.all([
+    const [{ data: packs }, { data: marketCards }, { data: ownedCards }] = await Promise.all([
       admin().from('packs').select('id,name,description,price_coins,cards_per_pack').eq('is_active', true),
       admin().from('cards').select('id,card_name,god_form,element,attack,defense,players(name,category)').limit(40),
+      user
+        ? admin()
+            .from('user_cards')
+            .select('id, card_variants(id, border, finish, rarity, cards(id, card_name, god_form, element, attack, defense, players(name, category)))')
+            .eq('user_id', user.id)
+            .order('acquired_at', { ascending: false })
+            .limit(300)
+        : Promise.resolve({ data: [] }),
     ]);
+
+    const collection = (ownedCards || []).map((owned) => {
+      const variant = owned.card_variants;
+      const card = variant?.cards;
+      return {
+        name: card?.players?.name || card?.card_name,
+        cardName: card?.card_name,
+        godForm: card?.god_form,
+        element: card?.element,
+        attack: card?.attack,
+        defense: card?.defense,
+        border: variant?.border,
+        finish: variant?.finish,
+        rarity: variant?.rarity,
+      };
+    });
 
     const ai = new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
@@ -89,11 +113,13 @@ export async function POST(req) {
       },
     });
 
-    const prompt = `You are Athena, grey-eyed goddess of wisdom, advising Trojan Haul card collectors in a rich, Homeric mythic voice—speaking of voyages, wine-dark seas, bronze shields, and glory, while remaining clear enough for a mortal collector to follow. Use only this market data:
+   const prompt = `You are Athena, advising Trojan Haul collectors. Answer the user's question directly and concisely in 180 words or fewer. Use a brief mythic flavor, but prioritize clear, practical advice. Use Markdown bold for important names and stats, and Markdown bullets only when listing items. Never repeat the entire market catalog unless explicitly asked.
 God forms: Zeus (Lightning, 95 ATK/85 DEF), Poseidon (Water, 90 ATK/90 DEF), Hades (Shadow, 98 ATK/80 DEF), Ares (Fire, 100 ATK/70 DEF).
 Rarities: Common (Matte), Rare (Bronze), Epic (Silver Holo), Legendary (Gold & FaZe Red Holo).
 Active Packs: ${JSON.stringify(packs)}
-Sample Cards: ${JSON.stringify(sampleCards)}
+Market Cards (not owned by the user): ${JSON.stringify(marketCards)}
+Owned Collection (the only cards the user owns): ${JSON.stringify(collection)}
+For questions about "my collection", "cards I have", or ownership, use only Owned Collection. Do not list Market Cards as owned. If Owned Collection is empty, say the user has no cards yet.
 Question: ${question}`;
 
     const models = [
@@ -108,7 +134,7 @@ Question: ${question}`;
         response = await ai.models.generateContent({
           model,
           contents: prompt,
-          config: { maxOutputTokens: 700, temperature: 0.7 },
+          config: { maxOutputTokens: 450, temperature: 0.7 },
         });
         break;
       } catch (e) {
