@@ -512,7 +512,10 @@ export default function Home() {
 
   const nav = (
     <nav className="nav">
-      <a className="logo" href="#" onClick={(e) => { e.preventDefault(); go('home'); }} aria-label={APP_NAME} />
+      <a className="brand" href="#" onClick={(e) => { e.preventDefault(); go('home'); }} aria-label={APP_NAME}>
+        <span className="logo" />
+        <span className="bname">{APP_NAME}</span>
+      </a>
       <ul>
         {[['home', 'Home'], ['packs', 'Packs'], ['collection', 'Collection'], ['trade', 'Trade'], ['leaderboard', 'Leaderboard']].map(([id, l]) => (
           <li key={id}><button className={view === id ? 'on' : ''} onClick={() => go(session || ['home', 'packs'].includes(id) ? id : 'auth')}>{l}</button></li>
@@ -694,11 +697,16 @@ export default function Home() {
       <>
         <section className="wrap hero">
           <div className="eyebrow">Season 1</div>
-          <h1>Open a pack.<br />Back a player.</h1>
+          <h1>{APP_NAME}</h1>
+          <h2 className="tag">Open a pack. Back a player.</h2>
           <p>Every legend starts with a journey. Collect player cards that level up with real stats, and follow your players from first match to the finals.</p>
           <div className="row">
-            <button className="btn red" onClick={() => go('packs')}>Shop packs</button>
-            <button className="btn" onClick={() => packsRef.current?.scrollIntoView({ behavior: 'smooth' })}>See the odds</button>
+            {session ? (
+              <button className="btn red" onClick={() => go('collection')}>My collection</button>
+            ) : (
+              <button className="btn red" onClick={() => go('auth')}>Sign up free</button>
+            )}
+            <button className="btn" onClick={() => go('packs')}>Shop packs</button>
           </div>
         </section>
         <section className="wrap about">
