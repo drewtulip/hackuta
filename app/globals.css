@@ -247,4 +247,9 @@ button:disabled{cursor:not-allowed}
 .bub.a{align-self:flex-start;background:#fff3f1;border:1px solid #f3c8c2}
 .bub.a b{color:var(--red)}
 .bub.wait{color:var(--mut);font-style:italic}
+.athena-md p{margin:0 0 10px}
+.athena-md p:last-child{margin-bottom:0}
+.athena-md ul{margin:0 0 10px;padding-left:22px}
+.athena-md li{margin:4px 0}
+.athena-md li:last-child{margin-bottom:0}
 .chat-empty{margin:0;font-size:13px}

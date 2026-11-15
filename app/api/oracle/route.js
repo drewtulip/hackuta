@@ -70,37 +70,85 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
-  const { question } = await req.json();
+  try {
+    const user = await getUser(req);
+    const body = await req.json();
+    const question = typeof body?.question === 'string' ? body.question.trim() : '';
+    if (!question) return NextResponse.json({ answer: FALLBACK_MSG }, { status: 400 });
 
-  const [{ data: packs }, { data: sampleCards }] = await Promise.all([
-    admin().from('packs').select('id,name,description,price_coins,cards_per_pack').eq('is_active', true),
-    admin().from('cards').select('id,card_name,god_form,element,attack,defense,players(name,category)').limit(40),
-  ]);
+    const [{ data: packs }, { data: sampleCards }] = await Promise.all([
+      admin().from('packs').select('id,name,description,price_coins,cards_per_pack').eq('is_active', true),
+      admin().from('cards').select('id,card_name,god_form,element,attack,defense,players(name,category)').limit(40),
+    ]);
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      httpOptions: {
+        timeout: 15000,
+        retryOptions: { attempts: 1 },
+      },
+    });
 
-  const prompt = `You are Athena, grey-eyed goddess of wisdom, advising Trojan Haul card collectors in a rich, Homeric mythic voice—speaking of voyages, wine-dark seas, bronze shields, and glory, while remaining clear enough for a mortal collector to follow. Use only this market data:
+    const prompt = `You are Athena, grey-eyed goddess of wisdom, advising Trojan Haul card collectors in a rich, Homeric mythic voice—speaking of voyages, wine-dark seas, bronze shields, and glory, while remaining clear enough for a mortal collector to follow. Use only this market data:
 God forms: Zeus (Lightning, 95 ATK/85 DEF), Poseidon (Water, 90 ATK/90 DEF), Hades (Shadow, 98 ATK/80 DEF), Ares (Fire, 100 ATK/70 DEF).
 Rarities: Common (Matte), Rare (Bronze), Epic (Silver Holo), Legendary (Gold & FaZe Red Holo).
 Active Packs: ${JSON.stringify(packs)}
 Sample Cards: ${JSON.stringify(sampleCards)}
 Question: ${question}`;
 
-  const models = ['gemini-3.8-flash', 'gemini-4-hydrogen'];
+    const models = [
+      process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
+      process.env.GEMINI_FALLBACK_MODEL || 'gemini-4-hydrogen',
+    ];
+    let response;
+    let lastError;
 
-  for (const model of models) {
-    try {
-      const interaction = await ai.interactions.create({
-        model,
-        input: prompt,
-        background: true,
-      });
-
-      return NextResponse.json({ interactionId: interaction.id });
-    } catch (e) {
-      console.error(`Oracle start error (${model}):`, e.status || e.message);
+    for (const model of models) {
+      try {
+        response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: { maxOutputTokens: 700, temperature: 0.7 },
+        });
+        break;
+      } catch (e) {
+        lastError = e;
+        const status = e.status || e.code;
+        if (status !== 404 && status !== 503 && status !== 504) throw e;
+        console.warn(`Oracle model unavailable (${model}, ${status}); trying fallback model.`);
+      }
     }
-  }
 
-  return NextResponse.json({ answer: FALLBACK_MSG });
+    if (!response) throw lastError || new Error('Gemini returned no response');
+    const answer = response.text?.trim();
+    if (!answer) {
+      console.warn('Oracle generation unavailable: Gemini returned an empty response');
+      return NextResponse.json(
+        { answer: FALLBACK_MSG, degraded: true },
+        { status: 200, headers: { 'Retry-After': '30' } }
+      );
+    }
+
+    if (user) {
+      await admin().from('athena_chats').insert({
+        user_id: user.id,
+        question,
+        answer,
+      });
+    }
+
+    return NextResponse.json({ answer });
+  } catch (e) {
+    const status = e.status || e.code;
+    if (status === 429 || status === 503 || status === 504) {
+      console.warn(`Oracle generation unavailable from Gemini (${status}):`, e.message);
+      return NextResponse.json(
+        { answer: FALLBACK_MSG, degraded: true },
+        { status: 200, headers: { 'Retry-After': '30' } }
+      );
+    }
+
+    console.error('Oracle generation error:', status || e.message);
+    return NextResponse.json({ answer: FALLBACK_MSG }, { status: 502 });
+  }
 }

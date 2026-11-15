@@ -51,6 +51,50 @@ const TRADES = [
   [['faze', 'FaZe Red · Zeus'], ['legendary', 'Legendary · Poseidon']],
 ];
 
+function renderAthenaInline(text, keyPrefix) {
+  return text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`${keyPrefix}-strong-${index}`}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('*') && part.endsWith('*')) {
+      return <em key={`${keyPrefix}-em-${index}`}>{part.slice(1, -1)}</em>;
+    }
+    return <span key={`${keyPrefix}-text-${index}`}>{part}</span>;
+  });
+}
+
+function AthenaMarkdown({ text }) {
+  const lines = String(text || '').split(/\r?\n/);
+  const content = [];
+  let listItems = [];
+
+  const flushList = () => {
+    if (listItems.length === 0) return;
+    content.push(<ul key={`list-${content.length}`}>{listItems}</ul>);
+    listItems = [];
+  };
+
+  lines.forEach((line, index) => {
+    const listMatch = line.match(/^\s*(?:[*-]|\d+\.)\s+(.+)/);
+    if (listMatch) {
+      listItems.push(
+        <li key={`item-${index}`}>{renderAthenaInline(listMatch[1], `item-${index}`)}</li>
+      );
+      return;
+    }
+
+    flushList();
+    if (line.trim()) {
+      content.push(
+        <p key={`paragraph-${index}`}>{renderAthenaInline(line, `paragraph-${index}`)}</p>
+      );
+    }
+  });
+
+  flushList();
+  return <div className="athena-md">{content}</div>;
+}
+
 const borderOf = (v) => {
   const b = (v?.border || '').toLowerCase();
   const r = (v?.rarity || '').toLowerCase();
@@ -450,7 +494,6 @@ export default function Home() {
   };
 
   const ATHENA_FALLBACK = 'Athena has ascended to Mount Olympus to commune with the Fates—return shortly.';
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   const ask = async () => {
     const question = q.trim();
@@ -463,15 +506,7 @@ export default function Home() {
     try {
       const r = await fetch('/api/oracle', { method: 'POST', headers, body: JSON.stringify({ question }) });
       const data = await r.json();
-      if (data.interactionId) {
-        // The answer is generated in the background: check back until it is ready (about 90s max).
-        for (let i = 0; i < 45; i++) {
-          await sleep(2000);
-          const pr = await fetch(`/api/oracle?id=${encodeURIComponent(data.interactionId)}&q=${encodeURIComponent(question)}`, { headers });
-          const pj = await pr.json();
-          if (pj.status === 'completed' || pj.status === 'failed') { answer = pj.answer || ATHENA_FALLBACK; break; }
-        }
-      } else if (data.answer) {
+      if (data.answer) {
         answer = data.answer;
       }
     } catch (e) {
@@ -833,7 +868,7 @@ export default function Home() {
                 {chats.map((c) => (
                   <div key={c.id}>
                     <div className="bub q"><b>You</b>{c.question}</div>
-                    <div className="bub a"><b>Athena</b>{c.answer}</div>
+                    <div className="bub a"><b>Athena</b><AthenaMarkdown text={c.answer} /></div>
                   </div>
                 ))}
                 {pending && (
