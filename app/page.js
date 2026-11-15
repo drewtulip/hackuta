@@ -111,30 +111,32 @@ export default function Home() {
   }, []);
 
   const load = async (uid) => {
-    const [pks, crds, vars] = await Promise.all([
+    const userId = uid || session?.user?.id;
+    if (!userId) return;
+
+    const [pks, crds, vars, wlt, inv] = await Promise.all([
       supabase.from('packs').select('*').eq('is_active', true).order('price_coins'),
       supabase.from('cards').select('*, players(name, category, image_url)').limit(300),
       supabase.from('card_variants').select('id, card_id, border, finish, rarity, edition, image_url').limit(1500),
+      supabase.from('user_wallets').select('*').eq('user_id', userId).maybeSingle(),
+      supabase
+        .from('user_cards')
+        .select('id, acquired_at, is_favorite, card_variants(id, border, finish, rarity, cards(id, card_name, god_form, element, attack, defense, players(name, category, image_url)))')
+        .eq('user_id', userId)
+        .order('acquired_at', { ascending: false }),
     ]);
-    let wallet = null;
-    let myCards = [];
-    if (uid) {
-      const [wlt, inv] = await Promise.all([
-        supabase.from('user_wallets').select('*').eq('user_id', uid).maybeSingle(),
-        supabase
-          .from('user_cards')
-          .select('id, acquired_at, is_favorite, card_variants(id, border, finish, rarity, cards(id, card_name, god_form, element, attack, defense, players(name, category, image_url)))')
-          .eq('user_id', uid)
-          .order('acquired_at', { ascending: false }),
-      ]);
-      wallet = wlt.data || { coins: 1000 };
-      myCards = inv.data || [];
-    }
-    setD({ packs: pks.data || [], cards: crds.data || [], variants: vars.data || [], wallet, myCards });
+
+    setD({
+      packs: pks.data || [],
+      cards: crds.data || [],
+      variants: vars.data || [],
+      wallet: wlt.data || { coins: 1000 },
+      myCards: inv.data || [],
+    });
   };
 
   useEffect(() => {
-    load(session?.user?.id);
+    if (session) load(session.user.id);
   }, [session]);
 
   const go = (v) => {
