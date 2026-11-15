@@ -1,0 +1,12 @@
+/* Designer: restyle freely. Logic lives in page.js, lib/ and app/api/. Card variants have hooks: .r0-.r3 (rarity), .v-halloween, .v-christmas */
+body{margin:0;font-family:Georgia,serif;background:#f6f3ec;color:#1d1b16}
+main{max-width:900px;margin:0 auto;padding:16px}
+button,input{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid #ccc;margin:2px}
+button.on,button.pri{background:#b8860b;color:#fff;border-color:#b8860b}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+.card{background:#fff;border:3px solid #999;border-radius:12px;padding:12px;font-size:14px}
+.r1{border-color:#2e8b57}.r2{border-color:#7b3fb8}.r3{border-color:#d4a017}
+.v-halloween{border-color:#ff7518;box-shadow:0 0 12px #ff7518}
+.v-christmas{border-color:#c0392b;box-shadow:0 0 12px #2e8b57}
+.tag{font-size:11px;text-transform:uppercase;color:#777}.mut{color:#777}
+table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #ddd;text-align:left}
