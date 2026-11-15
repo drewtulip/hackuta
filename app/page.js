@@ -756,7 +756,7 @@ export default function Home() {
                 <h4>{p.name}</h4>
                 <div className="p">{p.price}{p.per && <small>{p.per}</small>}</div>
                 <dl>{p.rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
-                <button className={`btn full ${p.btn || ''}`}>{p.cta}</button>
+                <button className={`btn full ${p.btn || ''}`} onClick={() => go(p.name === 'Free' && !session ? 'auth' : 'packs')}>{p.cta}</button>
               </div>
             ))}
           </div>
