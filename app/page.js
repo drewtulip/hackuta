@@ -64,10 +64,13 @@ const Silhouette = () => (
   </svg>
 );
 
-function GameCard({ border = 'common', god, name, sub, img, dim, level, small, empty, blank }) {
+function GameCard({ border = 'common', god, name, sub, img, dim, level, small, empty, blank, flat, onClick }) {
   const g = GODS[god];
+  const click = onClick
+    ? { onClick, role: 'button', tabIndex: 0, 'aria-label': `Inspect ${name}`, onKeyDown: (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onClick()) }
+    : {};
   return (
-    <div className={`gc tilt${dim ? ' dim' : ''}${small ? ' sm' : ''}${blank ? ' blank' : ''}`}>
+    <div className={`gc${flat ? '' : ' tilt'}${onClick ? ' click' : ''}${dim ? ' dim' : ''}${small ? ' sm' : ''}${blank ? ' blank' : ''}`} {...click}>
       <div className="in">
         <div className="top">
           {g ? <span className="god-chip" style={{ background: g.c }}>{god}</span> : <span />}
@@ -78,6 +81,143 @@ function GameCard({ border = 'common', god, name, sub, img, dim, level, small, e
         <div className="st">{empty ? 'Open packs to find it' : sub}</div>
       </div>
       <img className="frame" src={`/borders/${border}.png`} alt="" />
+    </div>
+  );
+}
+
+
+const HOLO = new Set(['epic', 'legendary', 'faze']);
+
+function InspectModal({ info, onClose }) {
+  const cardRef = useRef(null);
+  const stageRef = useRef(null);
+  const st = useRef({ ry: -18, rx: 6, vy: 0, target: null, dragging: false, moved: 0, lastX: 0, lastY: 0, lastT: 0 });
+  const g = GODS[info.god];
+
+  useEffect(() => {
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let raf;
+    const tick = () => {
+      const s = st.current;
+      if (!s.dragging) {
+        if (s.target !== null) {
+          const d = s.target - s.ry;
+          s.ry += d * (reduce ? 1 : 0.14);
+          if (Math.abs(d) < 0.1) { s.ry = s.target; s.target = null; }
+        } else if (Math.abs(s.vy) > 0.02) { s.ry += s.vy; s.vy *= 0.95; }
+        else {
+          s.vy = 0;
+          const snap = Math.round(s.ry / 180) * 180;
+          if (Math.abs(snap - s.ry) < 40) s.ry += (snap - s.ry) * 0.06;
+        }
+        s.rx += (6 - s.rx) * 0.06;
+      }
+      const el = cardRef.current;
+      if (el) {
+        el.style.transform = `rotateX(${s.rx}deg) rotateY(${s.ry}deg)`;
+        const n = ((s.ry % 360) + 360) % 360;
+        el.style.setProperty('--gx', `${50 - Math.sin((n * Math.PI) / 180) * 60}%`);
+        el.style.setProperty('--gy', `${30 - s.rx * 3}%`);
+        el.style.setProperty('--ga', `${s.ry * 1.5}deg`);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    const key = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', key);
+    stageRef.current?.focus();
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('keydown', key); };
+  }, [onClose]);
+
+  const flip = () => { const s = st.current; s.vy = 0; s.target = (Math.round(s.ry / 180) + 1) * 180; };
+  const down = (e) => {
+    const s = st.current;
+    s.dragging = true; s.moved = 0; s.vy = 0; s.target = null;
+    s.lastX = e.clientX; s.lastY = e.clientY; s.lastT = performance.now();
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const move = (e) => {
+    const s = st.current;
+    if (!s.dragging) {
+      const r = e.currentTarget.getBoundingClientRect();
+      s.rx = 6 - ((e.clientY - r.top) / r.height - 0.5) * 16;
+      return;
+    }
+    const dx = e.clientX - s.lastX, dy = e.clientY - s.lastY, now = performance.now();
+    s.moved += Math.abs(dx) + Math.abs(dy);
+    s.ry += dx * 0.45;
+    s.rx = Math.max(-25, Math.min(25, s.rx - dy * 0.25));
+    s.vy = (dx * 0.45) / Math.max(1, (now - s.lastT) / 16);
+    s.lastX = e.clientX; s.lastY = e.clientY; s.lastT = now;
+  };
+  const up = () => { const s = st.current; s.dragging = false; if (s.moved < 6) flip(); };
+  const keys = (e) => {
+    const s = st.current;
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); }
+    if (e.key === 'ArrowLeft') { s.target = null; s.vy = -4; }
+    if (e.key === 'ArrowRight') { s.target = null; s.vy = 4; }
+  };
+
+  const power = (info.atk ?? 0) + (info.def ?? 0);
+  const rows = [
+    ['Attack', info.atk ?? '–'],
+    ['Defense', info.def ?? '–'],
+    ['Rarity', info.rarity || BORDER_SHORT[info.border]],
+    ['Border', BORDER_LABEL[info.border]],
+    ['God form', info.god ? `${info.god}${g ? `, ${g.el}` : ''}` : '–'],
+    ['Category', info.category || '–'],
+  ];
+
+  return (
+    <div className="modal" onClick={onClose}>
+      <div className="inspect" role="dialog" aria-modal="true" aria-label={`${info.name} card`} onClick={(e) => e.stopPropagation()}>
+        <button className="x" onClick={onClose} aria-label="Close">×</button>
+        <div
+          className="stage"
+          ref={stageRef}
+          tabIndex={0}
+          aria-label="Card. Drag to spin, click or press Enter to flip, arrow keys to turn."
+          onPointerDown={down}
+          onPointerMove={move}
+          onPointerUp={up}
+          onPointerCancel={() => { st.current.dragging = false; }}
+          onKeyDown={keys}
+        >
+          <div className="shadow" />
+          <div className={`ccard${HOLO.has(info.border) ? ' holo-on' : ''}`} ref={cardRef}>
+            <div className="face">
+              <GameCard border={info.border} god={info.god} name={info.name} sub={`${BORDER_LABEL[info.border]}`} img={info.img} level={info.level} flat />
+              <div className="holo" /><div className="gloss" />
+            </div>
+            <div className="face back">
+              <div className="gc">
+                <div className="in back-in">
+                  <div className="nm">{info.name}</div>
+                  <div className="fate"><b>{power}</b><span>Power</span></div>
+                  <dl>
+                    {rows.map(([k, v]) => (<div key={k}><dt>{k}</dt><dd>{v}</dd></div>))}
+                  </dl>
+                </div>
+                <img className="frame" src={`/borders/${info.border}.png`} alt="" />
+              </div>
+              <div className="gloss" />
+            </div>
+          </div>
+        </div>
+        <div className="side">
+          <h2>{info.name}</h2>
+          <p className="mut">Drag to spin the card, click to flip it, and tilt it to catch the light. The back shows this card's stats.</p>
+          <div className="meta">
+            <span><i className="sq" style={{ background: BORDERS.find((b) => b.id === info.border)?.color }} />{BORDER_LABEL[info.border]}</span>
+            {g && <span><i className="dot" style={{ background: g.c }} />{info.god} · {g.el}</span>}
+          </div>
+          <div className="row2" style={{ margin: '18px 0 0' }}>
+            <button className="btn red" onClick={flip}>Flip card</button>
+            <button className="btn" onClick={onClose}>Close</button>
+          </div>
+          <div className="hint">Keyboard: arrow keys turn the card, Enter flips it, Esc closes.</div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -112,6 +252,7 @@ export default function Home() {
   const [filter, setFilter] = useState('All');
   const [sort, setSort] = useState('rare');
   const [lbShown, setLbShown] = useState(7);
+  const [inspect, setInspect] = useState(null);
   const packsRef = useRef(null);
 
   // Audio players kept across re-renders without triggering state updates
@@ -313,15 +454,21 @@ export default function Home() {
     const c = v?.cards || {};
     const p = c.players || {};
     const b = borderOf(v);
+    const name = p.name || c.card_name;
+    const info = {
+      border: b, god: c.god_form, name, img: p.image_url, level: c.level,
+      rarity: v?.rarity, atk: c.attack, def: c.defense, category: p.category,
+    };
     return (
       <GameCard
         key={key}
         border={b}
         god={c.god_form}
-        name={p.name || c.card_name}
+        name={name}
         sub={`${BORDER_SHORT[b]} · ${c.god_form || ''}`}
         img={p.image_url}
         level={c.level}
+        onClick={() => setInspect(info)}
         {...extra}
       />
     );
@@ -658,6 +805,7 @@ export default function Home() {
         </div>
       )}
       <main>{body}</main>
+      {inspect && <InspectModal info={inspect} onClose={() => setInspect(null)} />}
       {footer}
     </>
   );
