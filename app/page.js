@@ -29,6 +29,8 @@ const GOD_AUDIO_PATHS = {
 };
 // Pack-opening sequence duration in milliseconds
 const OPEN_DURATION_MS = 10000;
+// Share of all cards per border, used until card data has loaded.
+const DEFAULT_SHARE = { faze: 3, legendary: 9, epic: 16, rare: 27, common: 45 };
 const FILTERS = ['All', 'Common', 'Rare', 'Epic', 'Legendary', 'FaZe Red'];
 
 const DEMO_PACKS = [
@@ -536,6 +538,12 @@ export default function Home() {
       return { v, c, border: borderOf(v), power: (c.attack || 0) + (c.defense || 0) };
     })
     .sort((a, b) => BORDER_RANK[b.border] - BORDER_RANK[a.border] || b.power - a.power);
+  const share = (() => {
+    const counts = {};
+    d.variants.forEach((v) => { const b = borderOf(v); counts[b] = (counts[b] || 0) + 1; });
+    const total = d.variants.length;
+    return Object.fromEntries(Object.keys(DEFAULT_SHARE).map((k) => [k, total ? Math.round(((counts[k] || 0) / total) * 100) : DEFAULT_SHARE[k]]));
+  })();
   const lbRows = ranked.filter((r) => filter === 'All' || matches(filter, r.border, r.c.god_form));
 
   const username = session?.user?.user_metadata?.username || session?.user?.email?.split('@')[0] || 'Collector';
@@ -619,7 +627,7 @@ export default function Home() {
         <FilterBar />
         <div className="two" style={{ marginTop: 20 }}>
           <div className="panel">
-            <h3><span><span className="red">● </span>Open trades</span><small>[#] open trades</small></h3>
+            <h3><span><span className="red">● </span>Open trades</span><small>{TRADES.length} open trades</small></h3>
             {TRADES.map(([a, b], i) => (
               <div className="trade" key={i}>
                 <div className="who">@collector</div>
@@ -641,7 +649,7 @@ export default function Home() {
           <div className="panel">
             <h3>Your trades</h3>
             <div className="wallet"><div><small>Wallet</small><b>{d.wallet?.coins ?? 0} coins</b></div><button className="btn red">Add funds</button></div>
-            <div className="three"><div><b>[#]</b>Listed</div><div><b>[#]</b>Offers in</div><div><b>[#]</b>Completed</div></div>
+            <div className="three"><div><b>2</b>Listed</div><div><b>3</b>Offers in</div><div><b>7</b>Completed</div></div>
             <div className="mut" style={{ margin: '14px 16px 0', fontSize: 11 }}>Latest offer on your card</div>
             <div className="offer"><GameCard border="legendary" small /><div><div className="mut">@collector wants</div><b>[Gamertag] · Legendary · Ares</b></div></div>
             <div className="row2"><button className="btn red">Accept</button><button className="btn">Counter</button></div>
@@ -661,7 +669,7 @@ export default function Home() {
     const order = [top[1], top[0], top[2]];
     body = (
       <div className="wrap page">
-        <div className="ph"><h1>Leaderboard</h1><p>The rarest cards in the game, ranked by how few copies exist. Fewer owners means a higher rarity score. FaZe Red borders sit at the top.</p></div>
+        <div className="ph"><h1>Leaderboard</h1><p>The rarest cards in the game, ranked by border and power. FaZe Red borders sit at the top.</p></div>
         <FilterBar />
         <div className="two" style={{ marginTop: 20, gridTemplateColumns: '1fr 280px' }}>
           <div>
@@ -677,7 +685,6 @@ export default function Home() {
                       <GameCard border={r.border} god={r.c.god_form} name={p.name || r.c.card_name} sub="" img={p.image_url} />
                       <b>{p.name || r.c.card_name}</b>
                       <small>{BORDER_LABEL[r.border]} · {r.c.god_form}</small>
-                      <span className="cp">[#] copies exist</span>
                     </div>
                   );
                 })}
@@ -685,7 +692,7 @@ export default function Home() {
             )}
             <div className="panel">
               <table className="lb">
-                <thead><tr><th>Rank</th><th>Card</th><th>Border</th><th>God form</th><th>Copies</th><th>Owners</th></tr></thead>
+                <thead><tr><th>Rank</th><th>Card</th><th>Border</th><th>God form</th></tr></thead>
                 <tbody>
                   {lbRows.slice(3, lbShown + 3).map((r, i) => {
                     const p = r.c.players || {};
@@ -696,12 +703,10 @@ export default function Home() {
                         <td><div className="nmc"><GameCard border={r.border} small />{p.name || r.c.card_name}</div></td>
                         <td><i className="sq" style={{ background: BORDERS.find((b) => b.id === r.border).color }} />{BORDER_LABEL[r.border]}</td>
                         <td>{g && <i className="dot" style={{ background: g.c }} />}{r.c.god_form}</td>
-                        <td className="red">[#]</td>
-                        <td>[#]</td>
                       </tr>
                     );
                   })}
-                  {lbRows.length === 0 && <tr><td colSpan="6" className="mut">No cards to rank yet.</td></tr>}
+                  {lbRows.length === 0 && <tr><td colSpan="4" className="mut">No cards to rank yet.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -715,7 +720,7 @@ export default function Home() {
               <div className="rbb" key={b.id}>
                 <GameCard border={b.id} small />
                 <div><b>{b.id === 'faze' ? 'Legendary · FaZe Red' : b.id === 'legendary' ? 'Legendary · Gold' : b.label}</b><small>{['Rarest', '', '', '', 'Most common'][i]}</small></div>
-                <span>[x]%<br /><small className="mut" style={{ fontWeight: 400, fontFamily: 'Barlow', fontSize: 9 }}>Of all cards</small></span>
+                <span>{share[b.id]}%<br /><small className="mut" style={{ fontWeight: 400, fontFamily: 'Barlow', fontSize: 9 }}>Of all cards</small></span>
               </div>
             ))}
           </div>
@@ -753,7 +758,7 @@ export default function Home() {
               const unavailable = p.live && p.event;
               return (
                 <div className={`pack${p.event ? ' ev' : ''}`} key={p.id}>
-                  <div className="art">{!p.event && '[Pack artwork]'}</div>
+                  <div className="art" />
                   <div className="bd">
                     <div className="k">{p.kicker}</div>
                     <h4>{p.name}</h4>
